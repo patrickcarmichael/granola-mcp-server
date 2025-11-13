@@ -8,7 +8,8 @@ Note: We import FastMCP lazily to keep stdlib-only profile lightweight
 until the MCP runtime is actually used.
 """
 
-from __future__ import annotations
+# NOTE: Removed 'from __future__ import annotations' to avoid Pydantic type resolution issues
+# FastMCP/Pydantic needs actual type objects in the global namespace
 
 import sys
 from typing import Optional
@@ -42,48 +43,114 @@ from .tools import (
     search_meetings,
 )
 
+# Module-level globals for config and adapter
+_config = None
+_adapter = None
+
+
+# Tool wrapper functions defined at module level so type hints can resolve
+def _meetings_list_conversations(
+    q: Optional[str] = None,
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+    participants: Optional[list[str]] = None,
+    limit: Optional[int] = 50,
+    cursor: Optional[str] = None
+) -> ListMeetingsOutput:
+    params = ListMeetingsInput(
+        q=q, from_ts=from_ts, to_ts=to_ts,
+        participants=participants, limit=limit, cursor=cursor
+    )
+    return list_meetings(_config, _adapter, params)
+
+
+def _meetings_list(
+    q: Optional[str] = None,
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+    participants: Optional[list[str]] = None,
+    limit: Optional[int] = 50,
+    cursor: Optional[str] = None
+) -> ListMeetingsOutput:
+    params = ListMeetingsInput(
+        q=q, from_ts=from_ts, to_ts=to_ts,
+        participants=participants, limit=limit, cursor=cursor
+    )
+    return list_meetings(_config, _adapter, params)
+
+
+def _meetings_get_conversations(
+    id: str,
+    include: Optional[list[str]] = None
+) -> GetMeetingOutput:
+    params = GetMeetingInput(id=id, include=include)
+    return get_meeting(_config, _adapter, params)
+
+
+def _meetings_get(
+    id: str,
+    include: Optional[list[str]] = None
+) -> GetMeetingOutput:
+    params = GetMeetingInput(id=id, include=include)
+    return get_meeting(_config, _adapter, params)
+
+
+def _meetings_search(
+    q: str,
+    filters: Optional[dict] = None,
+    limit: Optional[int] = 50,
+    cursor: Optional[str] = None
+) -> SearchMeetingsOutput:
+    from .schemas import SearchFilters
+    filters_obj = SearchFilters(**filters) if filters else None
+    params = SearchMeetingsInput(q=q, filters=filters_obj, limit=limit, cursor=cursor)
+    return search_meetings(_config, _adapter, params)
+
+
+def _meetings_export_md(
+    id: str,
+    sections: Optional[list[str]] = None
+) -> ExportMarkdownOutput:
+    params = ExportMarkdownInput(id=id, sections=sections)
+    return export_markdown(_config, _adapter, params)
+
+
+def _meetings_stats_tool(
+    window: Optional[str] = None,
+    group_by: Optional[str] = None
+) -> StatsOutput:
+    params = StatsInput(window=window, group_by=group_by)
+    return meetings_stats(_config, _adapter, params)
+
+
+def _cache_status_tool() -> CacheStatusOutput:
+    return cache_status(_config, _adapter)
+
+
+def _cache_refresh_tool() -> RefreshCacheOutput:
+    params = RefreshCacheInput()
+    return refresh_cache(_config, _adapter, params)
+
 
 def _register_fastmcp_tools(app, config, adapter):
-    # Namespace: granola.*
+    # Store config and adapter in module globals
+    global _config, _adapter
+    _config = config
+    _adapter = adapter
 
-    @app.tool("granola.conversations.list")
-    def meetings_list_conversations(params: ListMeetingsInput) -> ListMeetingsOutput:
-        return list_meetings(config, adapter, params)
-
-    @app.tool("granola.meetings.list")
-    def meetings_list(params: ListMeetingsInput) -> ListMeetingsOutput:
-        return list_meetings(config, adapter, params)
-
-    @app.tool("granola.conversations.get")
-    def meetings_get_conversations(params: GetMeetingInput) -> GetMeetingOutput:
-        return get_meeting(config, adapter, params)
-
-    @app.tool("granola.meetings.get")
-    def meetings_get(params: GetMeetingInput) -> GetMeetingOutput:
-        return get_meeting(config, adapter, params)
-
-    @app.tool("granola.meetings.search")
-    def meetings_search(params: SearchMeetingsInput) -> SearchMeetingsOutput:
-        return search_meetings(config, adapter, params)
-
-    @app.tool("granola.meetings.export_markdown")
-    def meetings_export_md(params: ExportMarkdownInput) -> ExportMarkdownOutput:
-        return export_markdown(config, adapter, params)
-
-    @app.tool("granola.meetings.stats")
-    def meetings_stats_tool(params: StatsInput) -> StatsOutput:
-        return meetings_stats(config, adapter, params)
-
-    @app.tool("granola.cache.status")
-    def cache_status_tool() -> CacheStatusOutput:
-        return cache_status(config, adapter)
-
-    @app.tool("granola.cache.refresh")
-    def cache_refresh_tool(params: RefreshCacheInput) -> RefreshCacheOutput:
-        return refresh_cache(config, adapter, params)
+    # Register tools with FastMCP
+    app.tool("granola.conversations.list")(_meetings_list_conversations)
+    app.tool("granola.meetings.list")(_meetings_list)
+    app.tool("granola.conversations.get")(_meetings_get_conversations)
+    app.tool("granola.meetings.get")(_meetings_get)
+    app.tool("granola.meetings.search")(_meetings_search)
+    app.tool("granola.meetings.export_markdown")(_meetings_export_md)
+    app.tool("granola.meetings.stats")(_meetings_stats_tool)
+    app.tool("granola.cache.status")(_cache_status_tool)
+    app.tool("granola.cache.refresh")(_cache_refresh_tool)
 
 
-def main(argv: Optional[list[str]] = None) -> None:
+def main(argv = None):
     """Run the FastMCP application.
 
     This function loads configuration, creates a document source (local or remote),
