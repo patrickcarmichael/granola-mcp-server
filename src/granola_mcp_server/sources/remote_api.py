@@ -122,7 +122,7 @@ class RemoteApiDocumentSource(DocumentSource):
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
             "Accept": "*/*",
-            "User-Agent": "Granola-MCP-Server/0.1.0",
+            "User-Agent": "Granola/1.0.0",  # Match official Granola app
         }
         
         req = request.Request(url, data=payload, headers=headers, method="POST")
@@ -131,18 +131,19 @@ class RemoteApiDocumentSource(DocumentSource):
         for attempt in range(max_retries):
             try:
                 with request.urlopen(req, timeout=30) as response:
-                    # Read gzipped response
-                    compressed_data = response.read()
-                    
-                    # Decompress
+                    # Read response data
+                    response_data = response.read()
+
+                    # Try to decompress if gzipped, otherwise use as-is
                     try:
-                        decompressed_data = gzip.decompress(compressed_data)
+                        decompressed_data = gzip.decompress(response_data)
+                    except gzip.BadGzipFile:
+                        # Not gzipped, use raw data
+                        decompressed_data = response_data
                     except Exception as e:
-                        raise GranolaParseError(
-                            f"Failed to decompress response: {e}",
-                            {"attempt": attempt + 1}
-                        ) from e
-                    
+                        # Try to use raw data on any other decompression error
+                        decompressed_data = response_data
+
                     # Parse JSON
                     try:
                         data = json.loads(decompressed_data.decode("utf-8"))
@@ -220,17 +221,17 @@ class RemoteApiDocumentSource(DocumentSource):
         force: bool = False,
     ) -> List[Dict[str, object]]:
         """Fetch documents from API with caching.
-        
+
         Args:
-            limit: Maximum documents to fetch (default 100).
+            limit: Maximum documents to fetch (default 500 to get all).
             offset: Pagination offset (default 0).
             include_last_viewed_panel: Include panel data.
             force: Bypass cache and fetch fresh data.
-            
+
         Returns:
             List of document dictionaries.
         """
-        limit = limit or 100
+        limit = limit or 100  # API default limit
         offset = offset or 0
         
         # Check cache first
@@ -259,11 +260,56 @@ class RemoteApiDocumentSource(DocumentSource):
         
         return docs
 
+    def get_all_documents(
+        self,
+        *,
+        include_last_viewed_panel: bool = True,
+        force: bool = False,
+    ) -> List[Dict[str, object]]:
+        """Fetch ALL documents using pagination.
+
+        Makes multiple API calls with offset pagination to retrieve
+        all documents, regardless of total count.
+
+        Args:
+            include_last_viewed_panel: Include panel data.
+            force: Bypass cache and fetch fresh data.
+
+        Returns:
+            Complete list of all document dictionaries.
+        """
+        all_docs = []
+        offset = 0
+        batch_size = 100  # API returns max 100 per request
+
+        while True:
+            # Fetch batch
+            batch = self.get_documents(
+                limit=batch_size,
+                offset=offset,
+                include_last_viewed_panel=include_last_viewed_panel,
+                force=force,
+            )
+
+            if not batch:
+                # No more documents
+                break
+
+            all_docs.extend(batch)
+
+            # If we got less than batch_size, we've reached the end
+            if len(batch) < batch_size:
+                break
+
+            offset += batch_size
+
+        return all_docs
+
     def get_document_by_id(
         self, doc_id: str, *, force: bool = False
     ) -> Optional[Dict[str, object]]:
         """Fetch a single document by ID.
-        
+
         Note: This implementation fetches all documents and filters.
         A more efficient implementation would use a dedicated endpoint.
         """

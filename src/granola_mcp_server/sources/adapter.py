@@ -30,15 +30,19 @@ class DocumentSourceAdapter:
 
     def load_cache(self, force_reload: bool = False) -> Dict[str, Any]:
         """Load documents into a cache structure.
-        
+
         This mimics the GranolaParser.load_cache() behavior but works
         with any document source.
         """
         if self._cache is not None and not force_reload:
             return self._cache
-        
-        # Fetch documents from source
-        docs = self._source.get_documents(force=force_reload)
+
+        # Fetch ALL documents from source (with pagination for remote API)
+        # Check if source supports get_all_documents (for remote API with pagination)
+        if hasattr(self._source, 'get_all_documents'):
+            docs = self._source.get_all_documents(force=force_reload)
+        else:
+            docs = self._source.get_documents(force=force_reload)
         
         # Convert list to dict keyed by id (matching cache-v3.json structure)
         documents_dict = {}
