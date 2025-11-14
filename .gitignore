@@ -163,3 +163,10 @@ temp/
 test_mcp_*.py
 demo_*.py
 granola-cli.py
+
+# Local development files
+.specstory/
+granola
+granola-mcp-remote
+mise.toml
+*-this-session-is-being-continued-*.txt
